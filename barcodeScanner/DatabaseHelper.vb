@@ -5,7 +5,7 @@ Imports System.Collections.Generic
 Public Class DatabaseHelper
 
     Private Shared ReadOnly serverIpAddress As String = "localhost"
-    Private Shared ReadOnly databaseName As String = "nike_db"
+    Private Shared ReadOnly databaseName As String = "vb_barcode_db"
     Private Shared ReadOnly userId As String = "root"
     Private Shared ReadOnly password As String = ""
 
