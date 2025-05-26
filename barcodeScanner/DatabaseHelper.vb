@@ -1,30 +1,39 @@
 ﻿Imports MySql.Data.MySqlClient
 Imports System.IO
-Imports System.Collections.Generic ' Required for List(Of T)
+Imports System.Collections.Generic
 
 Public Class DatabaseHelper
-    ' --- IMPORTANT: Update serverIpAddress if MySQL is on another computer ---
+
     Private Shared ReadOnly serverIpAddress As String = "localhost"
-    Private Shared ReadOnly databaseName As String = "vb_barcode_db"
+    Private Shared ReadOnly databaseName As String = "nike_db"
     Private Shared ReadOnly userId As String = "root"
-    Private Shared ReadOnly password As String = "" ' No password for root
+    Private Shared ReadOnly password As String = ""
 
     Private Shared ReadOnly connectionString As String =
-        $"Server={serverIpAddress};Port=3306;Database={databaseName};Uid={userId};Pwd={password};Allow User Variables=True;"
+        $"Server={serverIpAddress};Port=3306;Database={databaseName};Uid={userId};Pwd={password};Allow User Variables=True;Convert Zero Datetime=True;" 'Added Convert Zero Datetime
 
     Public Shared Sub InitializeDatabase()
         Try
+
+            Dim initialConnectionString As String = $"Server={serverIpAddress};Port=3306;Uid={userId};Pwd={password};Allow User Variables=True;"
+            Using tempConnection As New MySqlConnection(initialConnectionString)
+                tempConnection.Open()
+                Using cmd As New MySqlCommand($"CREATE DATABASE IF NOT EXISTS `{databaseName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;", tempConnection)
+                    cmd.ExecuteNonQuery()
+                End Using
+            End Using
+
             Using connection As New MySqlConnection(connectionString)
                 connection.Open()
 
-                Dim createItemsTableQuery As String = "
-                CREATE TABLE IF NOT EXISTS Items (
-                    Id INT PRIMARY KEY AUTO_INCREMENT,
-                    Name VARCHAR(255) NOT NULL,
-                    Price DECIMAL(10,2) NOT NULL,
-                    BarcodeData VARCHAR(255) NOT NULL UNIQUE,
-                    DateCreated DATETIME DEFAULT CURRENT_TIMESTAMP
-                );"
+                Dim createItemsTableQuery As String = $"
+                CREATE TABLE IF NOT EXISTS `Items` (
+                    `Id` INT PRIMARY KEY AUTO_INCREMENT,
+                    `Name` VARCHAR(255) NOT NULL,
+                    `Price` DECIMAL(10,2) NOT NULL,
+                    `BarcodeData` VARCHAR(255) NOT NULL UNIQUE,
+                    `DateCreated` DATETIME DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
                 Using command As New MySqlCommand(createItemsTableQuery, connection)
                     command.ExecuteNonQuery()
                 End Using
@@ -44,64 +53,41 @@ Public Class DatabaseHelper
                     End Using
                 End If
 
-                ' --- NEW: Create SalesHeader Table ---
-                Dim createSalesHeaderTableQuery As String = "
-                CREATE TABLE IF NOT EXISTS SalesHeader (
-                    SaleID INT PRIMARY KEY AUTO_INCREMENT,
-                    SaleDateTime DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    TotalAmount DECIMAL(10,2) NOT NULL
-                );"
+                Dim createSalesHeaderTableQuery As String = $"
+                CREATE TABLE IF NOT EXISTS `SalesHeader` (
+                    `SaleID` INT PRIMARY KEY AUTO_INCREMENT,
+                    `SaleDateTime` DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    `TotalAmount` DECIMAL(10,2) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
                 Using command As New MySqlCommand(createSalesHeaderTableQuery, connection)
                     command.ExecuteNonQuery()
                 End Using
 
-                ' --- NEW: Create SalesDetails Table ---
-                ' --- MODIFIED: ItemID is now NULLABLE and FOREIGN KEY uses ON DELETE SET NULL ---
-                ' IMPORTANT: If you have an existing SalesDetails table with the old structure,
-                ' the following 'CREATE TABLE IF NOT EXISTS' will NOT modify it.
-                ' You will need to manually ALTER the table in your MySQL database.
-                ' Example SQL commands (execute these in a MySQL client like phpMyAdmin or Workbench):
-                '
-                ' 1. Find the existing foreign key constraint name for ItemID (replace 'your_fk_name_for_itemid' below):
-                '    SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
-                '    WHERE TABLE_SCHEMA = 'vb_barcode_db' AND TABLE_NAME = 'SalesDetails' AND COLUMN_NAME = 'ItemID' AND REFERENCED_TABLE_NAME = 'Items';
-                '
-                ' 2. Drop the old foreign key constraint:
-                '    ALTER TABLE SalesDetails DROP FOREIGN KEY your_fk_name_for_itemid;
-                '
-                ' 3. Modify the ItemID column to allow NULLs:
-                '    ALTER TABLE SalesDetails MODIFY COLUMN ItemID INT NULL;
-                '
-                ' 4. Add the new foreign key constraint with ON DELETE SET NULL:
-                '    ALTER TABLE SalesDetails ADD CONSTRAINT fk_salesdetails_itemid_items_id
-                '    FOREIGN KEY (ItemID) REFERENCES Items(Id) ON DELETE SET NULL;
-                '
-                Dim createSalesDetailsTableQuery As String = "
-                CREATE TABLE IF NOT EXISTS SalesDetails (
-                    SaleDetailID INT PRIMARY KEY AUTO_INCREMENT,
-                    SaleID INT NOT NULL,
-                    ItemID INT NULL,                             -- MODIFIED: Changed to allow NULL
-                    ItemNameSnapshot VARCHAR(255) NOT NULL,      -- Store item name at time of sale
-                    QuantitySold INT NOT NULL,
-                    PriceAtSale DECIMAL(10,2) NOT NULL,
-                    LineTotal DECIMAL(10,2) NOT NULL,
-                    FOREIGN KEY (SaleID) REFERENCES SalesHeader(SaleID) ON DELETE CASCADE,
-                    FOREIGN KEY (ItemID) REFERENCES Items(Id) ON DELETE SET NULL -- MODIFIED: Changed from RESTRICT
-                );"
+                Dim createSalesDetailsTableQuery As String = $"
+                CREATE TABLE IF NOT EXISTS `SalesDetails` (
+                    `SaleDetailID` INT PRIMARY KEY AUTO_INCREMENT,
+                    `SaleID` INT NOT NULL,
+                    `ItemID` INT NULL,
+                    `ItemNameSnapshot` VARCHAR(255) NOT NULL,
+                    `QuantitySold` INT NOT NULL,
+                    `PriceAtSale` DECIMAL(10,2) NOT NULL,
+                    `LineTotal` DECIMAL(10,2) NOT NULL,
+                    FOREIGN KEY (`SaleID`) REFERENCES `SalesHeader`(`SaleID`) ON DELETE CASCADE,
+                    FOREIGN KEY (`ItemID`) REFERENCES `Items`(`Id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
                 Using command As New MySqlCommand(createSalesDetailsTableQuery, connection)
                     command.ExecuteNonQuery()
                 End Using
 
             End Using
         Catch ex As Exception
-            Throw New Exception("Failed to initialize MySQL database: " & ex.Message & vbCrLf & "Connection String (password omitted): " & connectionString.Replace("Pwd=" & password, "Pwd=****"), ex)
+            Throw New Exception("Failed to initialize MySQL database: " & ex.Message & vbCrLf & "Attempted Connection String (password omitted): " & connectionString.Replace("Pwd=" & password, "Pwd=****"), ex)
         End Try
     End Sub
 
-    ' Add new item to database
     Public Shared Function AddItem(name As String, price As Decimal) As BarcodeItem
         Try
-            Dim barcodeData As String = name & "-" & price.ToString("F2")
+            Dim barcodeData As String = name.Trim() & "-" & price.ToString("F2")
 
             Using connection As New MySqlConnection(connectionString)
                 connection.Open()
@@ -111,13 +97,13 @@ Public Class DatabaseHelper
                 SELECT LAST_INSERT_ID();"
 
                 Using command As New MySqlCommand(insertQuery, connection)
-                    command.Parameters.AddWithValue("@name", name)
+                    command.Parameters.AddWithValue("@name", name.Trim())
                     command.Parameters.AddWithValue("@price", price)
                     command.Parameters.AddWithValue("@barcodeData", barcodeData)
                     Dim newId As Integer = Convert.ToInt32(command.ExecuteScalar())
                     Return New BarcodeItem() With {
                         .Id = newId,
-                        .Name = name,
+                        .Name = name.Trim(),
                         .Price = price,
                         .BarcodeData = barcodeData,
                         .DateCreated = DateTime.Now
@@ -125,9 +111,9 @@ Public Class DatabaseHelper
                 End Using
             End Using
         Catch exSQL As MySqlException
-            If exSQL.Number = 1062 Then ' Duplicate entry for UNIQUE key
-                Dim conflictingBarcodeData As String = name & "-" & price.ToString("F2")
-                Throw New Exception($"Failed to add item: The name/price results in barcode data '{conflictingBarcodeData}' which is already used by another item. (MySQL Error {exSQL.Number})")
+            If exSQL.Number = 1062 Then
+                Dim conflictingBarcodeData As String = name.Trim() & "-" & price.ToString("F2")
+                Throw New Exception($"Failed to add item: The name/price combination results in barcode data '{conflictingBarcodeData}' which is already used by another item. Please use a different name or price. (MySQL Error {exSQL.Number})")
             Else
                 Throw New Exception("MySQL database error adding item: " & exSQL.Message, exSQL)
             End If
@@ -139,7 +125,7 @@ Public Class DatabaseHelper
     ' Update existing item in database
     Public Shared Function UpdateItem(item As BarcodeItem) As Boolean
         Try
-            Dim updatedBarcodeData As String = item.Name & "-" & item.Price.ToString("F2")
+            Dim updatedBarcodeData As String = item.Name.Trim() & "-" & item.Price.ToString("F2")
             Using connection As New MySqlConnection(connectionString)
                 connection.Open()
                 Dim updateQuery As String = "
@@ -149,17 +135,18 @@ Public Class DatabaseHelper
                     BarcodeData = @barcodeData
                 WHERE Id = @id;"
                 Using command As New MySqlCommand(updateQuery, connection)
-                    command.Parameters.AddWithValue("@name", item.Name)
+                    command.Parameters.AddWithValue("@name", item.Name.Trim())
                     command.Parameters.AddWithValue("@price", item.Price)
                     command.Parameters.AddWithValue("@barcodeData", updatedBarcodeData)
                     command.Parameters.AddWithValue("@id", item.Id)
                     Dim rowsAffected As Integer = command.ExecuteNonQuery()
+                    If rowsAffected > 0 Then item.BarcodeData = updatedBarcodeData ' Update in-memory object
                     Return rowsAffected > 0
                 End Using
             End Using
         Catch exSQL As MySqlException
-            If exSQL.Number = 1062 Then ' Duplicate entry for UNIQUE key
-                Dim conflictingBarcodeData As String = item.Name & "-" & item.Price.ToString("F2")
+            If exSQL.Number = 1062 Then
+                Dim conflictingBarcodeData As String = item.Name.Trim() & "-" & item.Price.ToString("F2")
                 Throw New Exception($"Failed to update item: The new name/price results in barcode data '{conflictingBarcodeData}' which is already used by another item. (MySQL Error {exSQL.Number})")
             Else
                 Throw New Exception("MySQL database error updating item: " & exSQL.Message, exSQL)
@@ -189,6 +176,7 @@ Public Class DatabaseHelper
             End Using
             Return Nothing
         Catch ex As Exception
+            Console.WriteLine("Error FindItemByBarcode: " & ex.ToString())
             Throw New Exception("Failed to find item by barcode: " & ex.Message, ex)
         End Try
     End Function
@@ -212,6 +200,7 @@ Public Class DatabaseHelper
             End Using
             Return Nothing
         Catch ex As Exception
+            Console.WriteLine("Error FindItemById: " & ex.ToString())
             Throw New Exception("Failed to find item by ID: " & ex.Message, ex)
         End Try
     End Function
@@ -235,6 +224,7 @@ Public Class DatabaseHelper
             End Using
             Return Nothing
         Catch ex As Exception
+            Console.WriteLine("Error FindItemByName: " & ex.ToString())
             Throw New Exception("Failed to find item by Name: " & ex.Message, ex)
         End Try
     End Function
@@ -257,6 +247,7 @@ Public Class DatabaseHelper
                 End Using
             End Using
         Catch ex As Exception
+            Console.WriteLine("Error GetAllItems: " & ex.ToString())
             Throw New Exception("Failed to get items: " & ex.Message, ex)
         End Try
         Return items
@@ -274,17 +265,14 @@ Public Class DatabaseHelper
                 End Using
             End Using
         Catch ex As MySqlException
-            ' Check for foreign key constraint violation (e.g., MySQL error code 1451: ER_ROW_IS_REFERENCED_2)
-            ' With ON DELETE SET NULL for SalesDetails.ItemID, this specific error (1451)
-            ' should no longer occur for deleting an Item referenced by SalesDetails.
-            ' However, it's kept here in case Items.Id is referenced by other tables
-            ' with ON DELETE RESTRICT or if another FK issue arises (e.g. on SalesHeader if it referenced Items).
+
             If ex.Number = 1451 Then
-                Throw New Exception($"Failed to delete item: This item might be referenced by other records that prevent its deletion, or another integrity constraint was violated. (MySQL Error {ex.Number})", ex)
+                Throw New Exception($"Failed to delete item: This item is referenced by other records that prevent its deletion (MySQL Error {ex.Number}). Check other tables if SalesDetails FK is already SET NULL.", ex)
             Else
                 Throw New Exception("MySQL database error deleting item: " & ex.Message, ex)
             End If
         Catch ex As Exception
+            Console.WriteLine("Error DeleteItem: " & ex.ToString())
             Throw New Exception("Failed to delete item: " & ex.Message, ex)
         End Try
     End Function
@@ -295,18 +283,16 @@ Public Class DatabaseHelper
             .Name = reader("Name").ToString(),
             .Price = Convert.ToDecimal(reader("Price")),
             .BarcodeData = reader("BarcodeData").ToString(),
-            .DateCreated = Convert.ToDateTime(reader("DateCreated"))
+            .DateCreated = If(reader.IsDBNull(reader.GetOrdinal("DateCreated")), DateTime.MinValue, Convert.ToDateTime(reader("DateCreated")))
         }
     End Function
 
-    ' --- NEW: Sales Record Methods ---
     Public Shared Function RecordSale(transactionLineItems As List(Of TransactionLineItem), totalAmount As Decimal) As Integer
         Dim saleId As Integer = -1
         Using connection As New MySqlConnection(connectionString)
             connection.Open()
             Using transaction As MySqlTransaction = connection.BeginTransaction()
                 Try
-                    ' 1. Insert into SalesHeader
                     Dim insertHeaderQuery As String = "
                     INSERT INTO SalesHeader (TotalAmount, SaleDateTime)
                     VALUES (@totalAmount, NOW());
@@ -318,10 +304,10 @@ Public Class DatabaseHelper
                     End Using
 
                     If saleId <= 0 Then
-                        Throw New Exception("Failed to create sales header record.")
+                        transaction.Rollback()
+                        Throw New Exception("Failed to create sales header record (SaleID not generated).")
                     End If
 
-                    ' 2. Insert into SalesDetails for each item
                     Dim insertDetailQuery As String = "
                     INSERT INTO SalesDetails (SaleID, ItemID, ItemNameSnapshot, QuantitySold, PriceAtSale, LineTotal)
                     VALUES (@saleID, @itemID, @itemNameSnapshot, @quantitySold, @priceAtSale, @lineTotal);"
@@ -330,9 +316,9 @@ Public Class DatabaseHelper
                         Using detailCmd As New MySqlCommand(insertDetailQuery, connection, transaction)
                             detailCmd.Parameters.AddWithValue("@saleID", saleId)
                             detailCmd.Parameters.AddWithValue("@itemID", lineItem.Item.Id)
-                            detailCmd.Parameters.AddWithValue("@itemNameSnapshot", lineItem.Item.Name) ' Store name at time of sale
+                            detailCmd.Parameters.AddWithValue("@itemNameSnapshot", lineItem.Item.Name)
                             detailCmd.Parameters.AddWithValue("@quantitySold", lineItem.Quantity)
-                            detailCmd.Parameters.AddWithValue("@priceAtSale", lineItem.Item.Price) ' Store price at time of sale
+                            detailCmd.Parameters.AddWithValue("@priceAtSale", lineItem.Item.Price)
                             detailCmd.Parameters.AddWithValue("@lineTotal", lineItem.LineTotal)
                             detailCmd.ExecuteNonQuery()
                         End Using
@@ -342,7 +328,8 @@ Public Class DatabaseHelper
                     Return saleId
                 Catch ex As Exception
                     transaction.Rollback()
-                    Throw New Exception("Failed to record sale: " & ex.Message, ex)
+                    Console.WriteLine("Error RecordSale: " & ex.ToString())
+                    Throw New Exception("Failed to record sale transaction: " & ex.Message, ex)
                 End Try
             End Using
         End Using
@@ -356,7 +343,7 @@ Public Class DatabaseHelper
                 Dim selectQuery As String = "
                 SELECT SaleID, SaleDateTime, TotalAmount
                 FROM SalesHeader
-                ORDER BY SaleDateTime DESC;" ' Show newest sales first
+                ORDER BY SaleDateTime DESC;"
                 Using command As New MySqlCommand(selectQuery, connection)
                     Using reader As MySqlDataReader = command.ExecuteReader()
                         While reader.Read()
@@ -370,6 +357,7 @@ Public Class DatabaseHelper
                 End Using
             End Using
         Catch ex As Exception
+            Console.WriteLine("Error GetAllSalesHeaders: " & ex.ToString())
             Throw New Exception("Failed to get sales headers: " & ex.Message, ex)
         End Try
         Return sales
@@ -380,14 +368,11 @@ Public Class DatabaseHelper
         Try
             Using connection As New MySqlConnection(connectionString)
                 connection.Open()
-                ' We stored ItemNameSnapshot, so no need to join with Items table here for the name.
-                ' If ItemID is NULL (due to item deletion and ON DELETE SET NULL), ItemNameSnapshot still provides the name.
-                ' ItemID is selected here if you ever need to check its state (e.g., is it NULL?).
                 Dim selectQuery As String = "
-                SELECT SaleDetailID, SaleID, ItemID, ItemNameSnapshot, QuantitySold, PriceAtSale, LineTotal
-                FROM SalesDetails
-                WHERE SaleID = @saleId
-                ORDER BY SaleDetailID ASC;"
+                SELECT sd.SaleDetailID, sd.SaleID, sd.ItemID, sd.ItemNameSnapshot, sd.QuantitySold, sd.PriceAtSale, sd.LineTotal
+                FROM SalesDetails sd
+                WHERE sd.SaleID = @saleId
+                ORDER BY sd.SaleDetailID ASC;"
                 Using command As New MySqlCommand(selectQuery, connection)
                     command.Parameters.AddWithValue("@saleId", saleId)
                     Using reader As MySqlDataReader = command.ExecuteReader()
@@ -400,16 +385,18 @@ Public Class DatabaseHelper
                                 .PriceAtSale = Convert.ToDecimal(reader("PriceAtSale")),
                                 .LineTotal = Convert.ToDecimal(reader("LineTotal"))
                             }
-                            ' Example: If you wanted to append a note if the original item was deleted
-                            ' If reader.IsDBNull(reader.GetOrdinal("ItemID")) Then
-                            '     detail.ItemName &= " (Original Item Deleted)"
-                            ' End If
+
+                            If Not reader.IsDBNull(reader.GetOrdinal("ItemID")) Then
+                            Else
+                                detail.ItemName &= " (Original Item Deleted)"
+                            End If
                             details.Add(detail)
                         End While
                     End Using
                 End Using
             End Using
         Catch ex As Exception
+            Console.WriteLine("Error GetSaleDetailsBySaleId: " & ex.ToString())
             Throw New Exception("Failed to get sale details: " & ex.Message, ex)
         End Try
         Return details

@@ -62,7 +62,7 @@ Public Class RecordsForm
 
         lstSalesDetails = New ListBox()
         lstSalesDetails.Location = New Point(15, currentY)
-        lstSalesDetails.Font = New Font("Courier New", 10.0F) ' Match Form1's transaction list font
+        lstSalesDetails.Font = New Font("Courier New", 10.0F)
         lstSalesDetails.Size = New Size(Me.ClientSize.Width - 30, Me.ClientSize.Height - currentY - 60)
         lstSalesDetails.Anchor = AnchorStyles.Top Or AnchorStyles.Bottom Or AnchorStyles.Left Or AnchorStyles.Right
         Me.Controls.Add(lstSalesDetails)
@@ -82,13 +82,13 @@ Public Class RecordsForm
     Private Sub LoadSalesHeaders()
         Try
             lstSalesHeaders.Items.Clear()
-            lstSalesDetails.Items.Clear() ' Clear details when headers are reloaded
+            lstSalesDetails.Items.Clear()
             lblSalesDetailsHeader.Text = "Details for Selected Sale:"
 
             Dim sales As List(Of SaleHeaderRecord) = DatabaseHelper.GetAllSalesHeaders()
             If sales.Count > 0 Then
                 For Each sale In sales
-                    lstSalesHeaders.Items.Add(sale) ' Using SaleHeaderRecord.ToString()
+                    lstSalesHeaders.Items.Add(sale)
                 Next
             Else
                 lstSalesHeaders.Items.Add("No sales records found.")
