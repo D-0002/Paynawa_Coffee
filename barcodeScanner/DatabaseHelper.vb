@@ -1,6 +1,8 @@
 ﻿Imports MySql.Data.MySqlClient
 Imports System.IO
 Imports System.Collections.Generic
+Imports System.Security.Cryptography
+Imports System.Text
 
 Public Class DatabaseHelper
 
@@ -10,11 +12,19 @@ Public Class DatabaseHelper
     Private Shared ReadOnly password As String = ""
 
     Private Shared ReadOnly connectionString As String =
-        $"Server={serverIpAddress};Port=3306;Database={databaseName};Uid={userId};Pwd={password};Allow User Variables=True;Convert Zero Datetime=True;" 'Added Convert Zero Datetime
+        $"Server={serverIpAddress};Port=3306;Database={databaseName};Uid={userId};Pwd={password};Allow User Variables=True;Convert Zero Datetime=True;"
+
+    Private Shared Function HashPassword(passwordToHash As String) As String
+        If String.IsNullOrEmpty(passwordToHash) Then Return String.Empty
+        Using sha256 As SHA256 = SHA256.Create()
+            Dim bytes As Byte() = Encoding.UTF8.GetBytes(passwordToHash)
+            Dim hashBytes As Byte() = sha256.ComputeHash(bytes)
+            Return BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant()
+        End Using
+    End Function
 
     Public Shared Sub InitializeDatabase()
         Try
-
             Dim initialConnectionString As String = $"Server={serverIpAddress};Port=3306;Uid={userId};Pwd={password};Allow User Variables=True;"
             Using tempConnection As New MySqlConnection(initialConnectionString)
                 tempConnection.Open()
@@ -25,6 +35,18 @@ Public Class DatabaseHelper
 
             Using connection As New MySqlConnection(connectionString)
                 connection.Open()
+
+                ' --- CREATE USERS TABLE (Added) ---
+                Dim createUsersTableQuery As String = $"
+                CREATE TABLE IF NOT EXISTS `Users` (
+                    `UserID` INT PRIMARY KEY AUTO_INCREMENT,
+                    `Username` VARCHAR(100) NOT NULL UNIQUE,
+                    `PasswordHash` VARCHAR(255) NOT NULL,
+                    `DateCreated` DATETIME DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
+                Using command As New MySqlCommand(createUsersTableQuery, connection)
+                    command.ExecuteNonQuery()
+                End Using
 
                 Dim createItemsTableQuery As String = $"
                 CREATE TABLE IF NOT EXISTS `Items` (
@@ -85,6 +107,84 @@ Public Class DatabaseHelper
         End Try
     End Sub
 
+    Public Shared Function AddUser(username As String, passwordToAdd As String) As Boolean
+        If String.IsNullOrWhiteSpace(username) OrElse String.IsNullOrWhiteSpace(passwordToAdd) Then
+            Throw New ArgumentException("Username and password cannot be empty.")
+        End If
+
+        Try
+            Dim hashedPassword As String = HashPassword(passwordToAdd)
+            Using connection As New MySqlConnection(connectionString)
+                connection.Open()
+                Dim insertQuery As String = "INSERT INTO Users (Username, PasswordHash) VALUES (@username, @passwordHash);"
+                Using command As New MySqlCommand(insertQuery, connection)
+                    command.Parameters.AddWithValue("@username", username.Trim())
+                    command.Parameters.AddWithValue("@passwordHash", hashedPassword)
+                    Return command.ExecuteNonQuery() > 0
+                End Using
+            End Using
+        Catch exSQL As MySqlException
+            If exSQL.Number = 1062 Then
+                Throw New Exception($"Username '{username.Trim()}' already exists. Please choose a different username.", exSQL)
+            Else
+                Throw New Exception("MySQL database error adding user: " & exSQL.Message, exSQL)
+            End If
+        Catch ex As Exception
+            Throw New Exception("Failed to add user: " & ex.Message, ex)
+        End Try
+    End Function
+
+    Public Shared Function VerifyUser(username As String, passwordToCheck As String) As Boolean
+        If String.IsNullOrWhiteSpace(username) OrElse String.IsNullOrWhiteSpace(passwordToCheck) Then
+            Return False
+        End If
+
+        Try
+            Dim storedPasswordHash As String = Nothing
+            Using connection As New MySqlConnection(connectionString)
+                connection.Open()
+                Dim selectQuery As String = "SELECT PasswordHash FROM Users WHERE Username = @username;"
+                Using command As New MySqlCommand(selectQuery, connection)
+                    command.Parameters.AddWithValue("@username", username.Trim())
+                    Dim result = command.ExecuteScalar()
+                    If result IsNot Nothing AndAlso Not IsDBNull(result) Then
+                        storedPasswordHash = result.ToString()
+                    End If
+                End Using
+            End Using
+
+            If String.IsNullOrEmpty(storedPasswordHash) Then
+                Return False
+            End If
+
+            Dim providedPasswordHash As String = HashPassword(passwordToCheck)
+            Return String.Equals(storedPasswordHash, providedPasswordHash, StringComparison.OrdinalIgnoreCase)
+
+        Catch ex As Exception
+            Console.WriteLine("Error VerifyUser: " & ex.ToString())
+            Return False
+        End Try
+    End Function
+
+    Public Shared Function UserExists(username As String) As Boolean
+        If String.IsNullOrWhiteSpace(username) Then Return False
+        Try
+            Using connection As New MySqlConnection(connectionString)
+                connection.Open()
+                Dim query As String = "SELECT COUNT(1) FROM Users WHERE Username = @username;"
+                Using cmd As New MySqlCommand(query, connection)
+                    cmd.Parameters.AddWithValue("@username", username.Trim())
+                    Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
+                End Using
+            End Using
+        Catch ex As Exception
+            Console.WriteLine("Error UserExists: " & ex.ToString())
+            Throw New Exception("Failed to check if user exists: " & ex.Message, ex)
+        End Try
+    End Function
+    ' --- END USER MANAGEMENT FUNCTIONS ---
+
+
     Public Shared Function AddItem(name As String, price As Decimal) As BarcodeItem
         Try
             Dim barcodeData As String = name.Trim() & "-" & price.ToString("F2")
@@ -122,7 +222,6 @@ Public Class DatabaseHelper
         End Try
     End Function
 
-    ' Update existing item in database
     Public Shared Function UpdateItem(item As BarcodeItem) As Boolean
         Try
             Dim updatedBarcodeData As String = item.Name.Trim() & "-" & item.Price.ToString("F2")
@@ -140,7 +239,7 @@ Public Class DatabaseHelper
                     command.Parameters.AddWithValue("@barcodeData", updatedBarcodeData)
                     command.Parameters.AddWithValue("@id", item.Id)
                     Dim rowsAffected As Integer = command.ExecuteNonQuery()
-                    If rowsAffected > 0 Then item.BarcodeData = updatedBarcodeData ' Update in-memory object
+                    If rowsAffected > 0 Then item.BarcodeData = updatedBarcodeData
                     Return rowsAffected > 0
                 End Using
             End Using
@@ -156,7 +255,6 @@ Public Class DatabaseHelper
         End Try
     End Function
 
-    ' Find item by barcode data
     Public Shared Function FindItemByBarcode(barcodeData As String) As BarcodeItem
         Try
             Using connection As New MySqlConnection(connectionString)
@@ -265,7 +363,6 @@ Public Class DatabaseHelper
                 End Using
             End Using
         Catch ex As MySqlException
-
             If ex.Number = 1451 Then
                 Throw New Exception($"Failed to delete item: This item is referenced by other records that prevent its deletion (MySQL Error {ex.Number}). Check other tables if SalesDetails FK is already SET NULL.", ex)
             Else
@@ -386,8 +483,7 @@ Public Class DatabaseHelper
                                 .LineTotal = Convert.ToDecimal(reader("LineTotal"))
                             }
 
-                            If Not reader.IsDBNull(reader.GetOrdinal("ItemID")) Then
-                            Else
+                            If reader.IsDBNull(reader.GetOrdinal("ItemID")) Then
                                 detail.ItemName &= " (Original Item Deleted)"
                             End If
                             details.Add(detail)
